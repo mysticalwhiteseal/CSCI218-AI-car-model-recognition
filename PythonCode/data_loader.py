@@ -4,6 +4,7 @@ from operator import itemgetter
 import cv2
 import os
 import csv
+import glob
 import numpy as np
 import torch
 import pandas as pd
@@ -12,10 +13,16 @@ from torchvision.datasets import ImageFolder
 from torchvision.transforms.v2 import ToTensor, ToPILImage, Resize, CenterCrop, RandomRotation, RandomResizedCrop, RandomAffine, GaussianBlur, ColorJitter
 from sklearn.model_selection import train_test_split
 
+CLASS_NAMES_PATH = "data/names.csv"
+TRAIN_ANNO_PATH = "data/anno_train.csv"
+TEST_ANNO_PATH = "data/anno_test.csv"
+TRAIN_SRC_ROOT = "data/car_data/train"
+TRAIN_DST_ROOT = "data-processed/train"
+TEST_SRC_ROOT = "data/car_data/test"
+TEST_DST_ROOT = "data-processed/test"
 TARGET_SIZE = (224, 224)
 BBOX_CROP_MARGIN = 16
-DATA_SRC_ROOT = "data/car_data/train"
-DATA_DST_ROOT = "data-processed/train"
+
 
 class CarsSubset(Dataset):
     def __init__(self, subset, indices, transform=None):
@@ -52,7 +59,7 @@ def resize(img, target_size=TARGET_SIZE):
 
     return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
-def preprocess_image(class_names, annotations, src_root=DATA_SRC_ROOT, dst_root=DATA_DST_ROOT):
+def preprocess_image(class_names, annotations, src_root, dst_root):
     for class_id, annotation_group in groupby(iterable=annotations, key=itemgetter("class_id")):
         class_name = class_names[class_id - 1]
         if not os.path.exists(dst_root + f"/{class_name}"):
@@ -69,7 +76,7 @@ def preprocess_image(class_names, annotations, src_root=DATA_SRC_ROOT, dst_root=
 
             cv2.imwrite(filename=dst_root + f"/{class_name}/{annotation['fname']}", img=resized_img)
 
-def get_names(path):
+def get_names(path=CLASS_NAMES_PATH):
     reader = csv.reader(open(path))
     names = chain.from_iterable(list(reader))
     names = [f.replace("/", "-") for f in names]
@@ -88,7 +95,22 @@ def get_annotations(path):
 
     return sorted(annotations, key=itemgetter("class_id"))
 
-names = get_names("data/names.csv")
-annotations = get_annotations("data/anno_train.csv")
+# Sample code to perform preprocessing steps
+names = get_names(CLASS_NAMES_PATH)
+train_annotations = get_annotations(TRAIN_ANNO_PATH)
+test_annotations = get_annotations(TEST_ANNO_PATH)
 
-preprocess_image(names, annotations)
+preprocess_image(names, train_annotations, TRAIN_SRC_ROOT, TRAIN_DST_ROOT)
+preprocess_image(names, test_annotations, TEST_SRC_ROOT, TEST_DST_ROOT)
+
+# Verifying processed data size
+print(f"Number of processed training samples: {len(glob.glob(TRAIN_DST_ROOT + "/**/*.jpg"))}")
+print(f"Number of processed test samples: {len(glob.glob(TEST_DST_ROOT + "/**/*.jpg"))}")
+print(f"Number of classes in processed training samples: {len(next(os.walk(TRAIN_DST_ROOT))[1])}")
+print(f"Number of classes in processed test samples: {len(next(os.walk(TEST_DST_ROOT))[1])}")
+
+# Output
+# Number of processed training samples: 8144
+# Number of processed test samples: 8041
+# Number of classes in processed training samples: 196
+# Number of classes in processed test samples: 196
