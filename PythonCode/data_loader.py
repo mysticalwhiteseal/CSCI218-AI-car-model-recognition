@@ -8,9 +8,9 @@ import glob
 import numpy as np
 import torch
 import pandas as pd
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import ImageFolder
-from torchvision.transforms.v2 import ToTensor, ToPILImage, Resize, CenterCrop, RandomRotation, RandomResizedCrop, RandomAffine, GaussianBlur, ColorJitter
+import torchvision.transforms.v2 as transforms
 from sklearn.model_selection import train_test_split
 
 CLASS_NAMES_PATH = "data/names.csv"
@@ -22,22 +22,22 @@ TEST_SRC_ROOT = "data/car_data/test"
 TEST_DST_ROOT = "data-processed/test"
 TARGET_SIZE = (224, 224)
 BBOX_CROP_MARGIN = 16
+BATCH_SIZE = 32
 
 
-class CarsSubset(Dataset):
-    def __init__(self, subset, indices, transform=None):
-        self.subset = subset
-        self.indices = indices
+class CarsSubset(Subset):
+    def __init__(self, dataset, indices, transform=None):
+        super().__init__(dataset, indices)
         self.transform = transform
 
     def __getitem__(self, idx):
-        img, label = self.subset[self.indices[idx]]
+        img, label = self.dataset[self.indices[idx]]
         if self.transform:
             img = self.transform(img)
         return img, label
     
     def __len__(self):
-        return len(self.subset)
+        return len(self.indices)
 
 def crop_to_bbox(img, annotation):
     height, width = img.shape[:2]
@@ -96,12 +96,12 @@ def get_annotations(path):
     return sorted(annotations, key=itemgetter("class_id"))
 
 # Sample code to perform preprocessing steps
-names = get_names(CLASS_NAMES_PATH)
-train_annotations = get_annotations(TRAIN_ANNO_PATH)
-test_annotations = get_annotations(TEST_ANNO_PATH)
+# names = get_names(CLASS_NAMES_PATH)
+# train_annotations = get_annotations(TRAIN_ANNO_PATH)
+# test_annotations = get_annotations(TEST_ANNO_PATH)
 
-preprocess_image(names, train_annotations, TRAIN_SRC_ROOT, TRAIN_DST_ROOT)
-preprocess_image(names, test_annotations, TEST_SRC_ROOT, TEST_DST_ROOT)
+# preprocess_image(names, train_annotations, TRAIN_SRC_ROOT, TRAIN_DST_ROOT)
+# preprocess_image(names, test_annotations, TEST_SRC_ROOT, TEST_DST_ROOT)
 
 # Verifying processed data size
 print(f"Number of processed training samples: {len(glob.glob(TRAIN_DST_ROOT + "/**/*.jpg"))}")
@@ -114,3 +114,46 @@ print(f"Number of classes in processed test samples: {len(next(os.walk(TEST_DST_
 # Number of processed test samples: 8041
 # Number of classes in processed training samples: 196
 # Number of classes in processed test samples: 196
+
+train_val_data = ImageFolder(TRAIN_DST_ROOT)
+test_data = ImageFolder(TEST_DST_ROOT)
+
+train_indices, val_indices, _, _ = train_test_split(
+    range(len(train_val_data)), 
+    train_val_data.targets, 
+    stratify=train_val_data.targets, 
+    test_size=0.2, 
+    random_state=42
+)
+
+train_transforms = transforms.Compose([
+    transforms.CenterCrop(TARGET_SIZE), 
+    transforms.RandomHorizontalFlip(), 
+    transforms.RandomRotation(15), 
+    transforms.ColorJitter(brightness=.5, contrast=.2, saturation=.2, hue=.1), 
+    transforms.ToImage(), 
+    transforms.ToDtype(torch.float32, scale=False), 
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
+valid_test_transforms = transforms.Compose([
+    transforms.CenterCrop(TARGET_SIZE), 
+    transforms.ToImage(), 
+    transforms.ToDtype(torch.float32, scale=False), 
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
+train_split = CarsSubset(train_val_data, train_indices, transform=train_transforms)
+val_split = CarsSubset(train_val_data, val_indices, transform=valid_test_transforms)
+test_split = CarsSubset(test_data, range(len(test_data)), transform=valid_test_transforms)
+
+# Verifying length of splits
+print(len(train_split))
+print(len(val_split))
+print(len(test_split))
+
+dataloaders = {
+    "train": DataLoader(train_split, batch_size=BATCH_SIZE, shuffle=True), 
+    "val": DataLoader(val_split, batch_size=BATCH_SIZE, shuffle=True), 
+    "test": DataLoader(test_split, batch_size=BATCH_SIZE, shuffle=True)
+}
